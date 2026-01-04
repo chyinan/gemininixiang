@@ -41,16 +41,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 静态文件路由 (用于示例图片)
+# 静态文件路由 (CSS, JS, 图片等)
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
-@app.get("/static/{filename}")
-async def serve_static(filename: str):
-    """提供静态文件（示例图片等）"""
-    file_path = os.path.join(os.path.dirname(__file__), filename)
-    if os.path.exists(file_path):
-        return FileResponse(file_path)
-    raise HTTPException(status_code=404, detail="文件不存在")
+# 挂载静态文件目录
+if os.path.exists("static"):
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# 提供根目录的 image.png 文件（兼容旧路径）
+@app.get("/static/image.png")
+async def serve_image():
+    """提供示例图片"""
+    # 优先从 static 目录查找
+    static_path = os.path.join(os.path.dirname(__file__), "static", "image.png")
+    root_path = os.path.join(os.path.dirname(__file__), "image.png")
+    
+    if os.path.exists(static_path):
+        return FileResponse(static_path)
+    elif os.path.exists(root_path):
+        return FileResponse(root_path)
+    else:
+        raise HTTPException(status_code=404, detail="示例图片不存在")
 
 # 存储有效的 session token
 _admin_sessions = set()
@@ -88,6 +100,8 @@ _config = {
     "APISID": "",
     "PUSH_ID": "",
     "FULL_COOKIE": "",  # 存储完整cookie字符串
+    "MANUAL_SNLM0E": "",  # 手动输入的 AT Token（用于保存用户输入）
+    "MANUAL_PUSH_ID": "",  # 手动输入的 PUSH_ID（用于保存用户输入）
     "MODELS": DEFAULT_MODELS.copy(),  # 可用模型列表
     "MODEL_IDS": DEFAULT_MODEL_IDS.copy(),  # 模型 ID 映射
 }
@@ -461,488 +475,36 @@ def get_client():
 
 
 def get_login_html():
-    return '''<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>登录 - Gemini API</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; 
-            display: flex; align-items: center; justify-content: center; padding: 20px; }
-        .login-card { background: white; border-radius: 16px; padding: 40px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); width: 100%; max-width: 400px; }
-        h1 { color: #333; margin-bottom: 10px; font-size: 28px; text-align: center; }
-        .subtitle { color: #666; margin-bottom: 30px; font-size: 14px; text-align: center; }
-        .form-group { margin-bottom: 20px; }
-        label { display: block; font-size: 13px; font-weight: 500; color: #555; margin-bottom: 8px; }
-        input { width: 100%; padding: 14px 16px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 15px; transition: border-color 0.2s; }
-        input:focus { outline: none; border-color: #667eea; }
-        .btn { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 14px 30px;
-            border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; width: 100%; margin-top: 10px; transition: transform 0.2s, box-shadow 0.2s; }
-        .btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(102,126,234,0.4); }
-        .btn:disabled { opacity: 0.7; cursor: not-allowed; transform: none; }
-        .error { background: #f8d7da; color: #721c24; padding: 12px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; display: none; }
-        .logo { text-align: center; margin-bottom: 20px; font-size: 48px; }
-    </style>
-</head>
-<body>
-    <div class="login-card">
-        <div class="logo">🤖</div>
-        <h1>Gemini API</h1>
-        <p class="subtitle">请登录以访问后台管理</p>
-        
-        <div id="error" class="error"></div>
-        
-        <form id="loginForm">
-            <div class="form-group">
-                <label>用户名</label>
-                <input type="text" name="username" id="username" placeholder="请输入用户名" required autofocus>
-            </div>
-            <div class="form-group">
-                <label>密码</label>
-                <input type="password" name="password" id="password" placeholder="请输入密码" required>
-            </div>
-            <button type="submit" class="btn" id="submitBtn">登 录</button>
-        </form>
-    </div>
-    
-    <script>
-        document.getElementById('loginForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const errorEl = document.getElementById('error');
-            const submitBtn = document.getElementById('submitBtn');
-            
-            errorEl.style.display = 'none';
-            submitBtn.disabled = true;
-            submitBtn.textContent = '登录中...';
-            
-            try {
-                const resp = await fetch('/admin/login', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        username: document.getElementById('username').value,
-                        password: document.getElementById('password').value
-                    })
-                });
-                const result = await resp.json();
-                
-                if (result.success) {
-                    window.location.href = '/admin';
-                } else {
-                    errorEl.textContent = result.message || '登录失败';
-                    errorEl.style.display = 'block';
-                }
-            } catch (err) {
-                errorEl.textContent = '网络错误: ' + err.message;
-                errorEl.style.display = 'block';
-            } finally {
-                submitBtn.disabled = false;
-                submitBtn.textContent = '登 录';
-            }
-        });
-    </script>
-</body>
+    """读取登录页面模板"""
+    template_path = os.path.join(os.path.dirname(__file__), "templates", "login.html")
+    if os.path.exists(template_path):
+        with open(template_path, "r", encoding="utf-8") as f:
+            return f.read()
+    else:
+        # 降级方案：返回简单的HTML
+        return '''<!DOCTYPE html>
+<html><head><title>登录</title></head>
+<body><h1>模板文件未找到，请确保 templates/login.html 存在</h1></body>
 </html>'''
 
 
 def get_admin_html():
-    return '''<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gemini API 配置</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; }
-        .container { max-width: 800px; margin: 0 auto; }
-        .card { background: white; border-radius: 16px; padding: 30px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
-        h1 { color: #333; margin-bottom: 10px; font-size: 28px; }
-        .subtitle { color: #666; margin-bottom: 30px; font-size: 14px; }
-        .section { margin-bottom: 25px; }
-        .section-title { font-size: 16px; font-weight: 600; color: #333; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #eee; }
-        .required { color: #e74c3c; }
-        .optional { color: #95a5a6; font-size: 12px; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; font-size: 13px; font-weight: 500; color: #555; margin-bottom: 5px; }
-        input, textarea { width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; font-family: monospace; transition: border-color 0.2s; }
-        input:focus, textarea:focus { outline: none; border-color: #667eea; }
-        textarea { resize: vertical; min-height: 80px; }
-        .btn { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 14px 30px;
-            border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; width: 100%; margin-top: 20px; transition: transform 0.2s, box-shadow 0.2s; }
-        .btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(102,126,234,0.4); }
-        .status { margin-top: 20px; padding: 15px; border-radius: 8px; font-size: 14px; display: none; }
-        .status.success { background: #d4edda; color: #155724; display: block; }
-        .status.error { background: #f8d7da; color: #721c24; display: block; }
-        .info-box { background: #f8f9fa; border-radius: 8px; padding: 15px; margin-bottom: 20px; font-size: 13px; color: #666; }
-        .info-box code { background: #e9ecef; padding: 2px 6px; border-radius: 4px; }
-        .api-info { background: #e8f4fd; border-left: 4px solid #667eea; padding: 15px; margin-top: 20px; border-radius: 0 8px 8px 0; }
-        .api-info h3 { font-size: 14px; margin-bottom: 10px; color: #333; }
-        .api-info pre { background: #fff; padding: 10px; border-radius: 4px; font-size: 12px; margin-top: 5px; overflow-x: auto; }
-        .parsed-info { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 15px; margin-top: 15px; font-size: 12px; display: none; }
-        .parsed-info h4 { color: #0369a1; margin-bottom: 10px; }
-        .parsed-info .item { margin: 5px 0; color: #555; }
-        .parsed-info .item span { color: #059669; font-family: monospace; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="card">
-            <h1>🤖 Gemini API 配置</h1>
-            <p class="subtitle">配置 Google Gemini 的认证信息，保存后即可调用 API <a href="/admin/logout" style="float:right;color:#667eea;text-decoration:none;">退出登录</a></p>
-            
-            <div class="info-box">
-                <strong>获取方法：</strong><br>
-                1. 打开 <a href="https://gemini.google.com" target="_blank">gemini.google.com</a> 并登录<br>
-                2. F12 → 网络 → 发送内容到聊天 →  点击任意请求 → Copy 请求头内完整cookie
-            </div>
-            
-            <form id="configForm">
-                <div class="section">
-                    <div class="section-title">🔑 Cookie 配置</div>
-                    <div class="form-group">
-                        <label>完整 Cookie <span class="required">*</span></label>
-                        <textarea name="FULL_COOKIE" id="FULL_COOKIE" rows="6" placeholder="粘贴从浏览器复制的完整 Cookie 字符串，系统会自动解析所需字段和 Token..." required></textarea>
-                        <div id="parsedInfo" class="parsed-info">
-                            <h4>✅ 已解析的字段：</h4>
-                            <div id="parsedFields"></div>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label>AT Token (SNlM0e) <span class="optional">(可选，如果自动获取失败可手动填写)</span></label>
-                        <input type="text" name="MANUAL_SNLM0E" id="MANUAL_SNLM0E" placeholder="如果自动获取失败，可手动填写 AT Token">
-                        <div class="info-box" style="margin-top:5px;font-size:12px;">
-                            <strong>手动获取方法：</strong>打开 gemini.google.com → F12 → 查看页面源代码 (Ctrl+U) → 搜索 "SNlM0e" → 复制引号内的值
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label>PUSH_ID <span class="optional">(可选，用于图片上传功能，如果自动获取失败可手动填写)</span></label>
-                        <input type="text" name="MANUAL_PUSH_ID" id="MANUAL_PUSH_ID" placeholder="格式: feeds/xxxxx (如果自动获取失败，可手动填写)">
-                        <div class="info-box" style="margin-top:5px;font-size:12px;">
-                            <strong>手动获取方法：</strong><br>
-                            方法1: 打开 gemini.google.com → F12 → Network → 上传一张图片 → 查找 upload 请求 → 在请求头中找到 push-id 或 feeds/xxxxx<br>
-                            方法2: 在页面源代码中搜索 "feeds/" 找到类似 "feeds/xxxxxxxxxxxxxx" 的字符串
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="section">
-                    <div class="section-title">🎯 模型 ID 配置 <span class="optional">(可选，如果模型切换失效请更新)</span></div>
-                    <div class="info-box">
-                        <strong>获取方法：</strong>F12 → Network → 在 Gemini 中切换模型发送消息 → 找到请求头 <code>x-goog-ext-525001261-jspb</code> → 复制整个数组值粘贴到下方输入框
-                    </div>
-                    <div class="form-group">
-                        <label>快速解析 <span class="optional">(粘贴请求头数组自动提取 ID)</span></label>
-                        <input type="text" id="MODEL_ID_PARSER" placeholder='粘贴如: [1,null,null,null,"56fdd199312815e2",null,null,0,[4],null,null,2]'>
-                        <div id="parsedModelId" class="parsed-info" style="margin-top:10px;">
-                            <h4>✅ 已提取的模型 ID：</h4>
-                            <div id="parsedModelIdValue"></div>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label>极速版 (Flash) ID</label>
-                        <input type="text" name="MODEL_ID_FLASH" id="MODEL_ID_FLASH" placeholder="56fdd199312815e2">
-                    </div>
-                    <div class="form-group">
-                        <label>Pro 版 ID</label>
-                        <input type="text" name="MODEL_ID_PRO" id="MODEL_ID_PRO" placeholder="e6fa609c3fa255c0">
-                    </div>
-                    <div class="form-group">
-                        <label>思考版 (Thinking) ID</label>
-                        <input type="text" name="MODEL_ID_THINKING" id="MODEL_ID_THINKING" placeholder="e051ce1aa80aa576">
-                    </div>
-                </div>
-                
-                <button type="submit" class="btn">💾 保存配置</button>
-            </form>
-            
-            <div id="status" class="status"></div>
-            
-            <div class="api-info">
-                <h3>📡 API 调用信息</h3>
-                <p>Base URL: <strong id="baseUrl"></strong></p>
-                <p>API Key: <strong id="apiKey"></strong></p>
-                <p>可用模型: <code>gemini-3.0-flash</code> | <code>gemini-3.0-pro</code> | <code>gemini-3.0-flash-thinking</code></p>
-                
-                <h4 style="margin-top:15px;">💬 文本对话</h4>
-<pre>from openai import OpenAI
-client = OpenAI(base_url="<span id="codeUrl"></span>", api_key="<span id="codeKey"></span>")
-
-response = client.chat.completions.create(
-    model="gemini-3.0-flash",  # 或 gemini-3.0-pro / gemini-3.0-flash-thinking
-    messages=[{"role": "user", "content": "你好"}]
-)
-print(response.choices[0].message.content)</pre>
-
-                <h4 style="margin-top:15px;">🖼️ 图片识别</h4>
-<pre>import base64
-from openai import OpenAI
-client = OpenAI(base_url="<span id="codeUrl2"></span>", api_key="<span id="codeKey2"></span>")
-
-# 读取本地图片
-with open("image.png", "rb") as f:
-    img_b64 = base64.b64encode(f.read()).decode()
-
-response = client.chat.completions.create(
-    model="gemini-3.0-flash",
-    messages=[{
-        "role": "user",
-        "content": [
-            {"type": "text", "text": "请描述这张图片"},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}}
-        ]
-    }]
-)
-print(response.choices[0].message.content)</pre>
-
-                <h4 style="margin-top:15px;">🌊 流式响应</h4>
-<pre>stream = client.chat.completions.create(
-    model="gemini-3.0-flash",
-    messages=[{"role": "user", "content": "写一首诗"}],
-    stream=True
-)
-for chunk in stream:
-    if chunk.choices[0].delta.content:
-        print(chunk.choices[0].delta.content, end="", flush=True)</pre>
-
-                <h4 style="margin-top:15px;">📷 示例图片</h4>
-                <p style="font-size:12px;color:#666;">以下是 image.png 示例图片，可用于测试图片识别功能（点击放大）：</p>
-                <img id="sampleImage" src="/static/image.png" alt="示例图片" style="max-width:300px;border-radius:8px;margin-top:10px;border:1px solid #ddd;cursor:pointer;" onclick="showImageModal()" onerror="this.style.display='none';this.nextElementSibling.style.display='block';">
-                <p style="display:none;font-size:12px;color:#999;">（示例图片不可用，请确保 image.png 文件存在）</p>
-            </div>
-        </div>
-    </div>
-    
-    <!-- 图片放大模态框 -->
-    <div id="imageModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1000;justify-content:center;align-items:center;cursor:pointer;" onclick="hideImageModal()">
-        <img src="/static/image.png" alt="示例图片" style="max-width:90%;max-height:90%;border-radius:8px;box-shadow:0 0 30px rgba(0,0,0,0.5);">
-        <span style="position:absolute;top:20px;right:30px;color:white;font-size:30px;cursor:pointer;">&times;</span>
-    </div>
-    
-    <script>
-        // 图片放大功能
-        function showImageModal() {
-            document.getElementById('imageModal').style.display = 'flex';
-            document.body.style.overflow = 'hidden';
-        }
-        function hideImageModal() {
-            document.getElementById('imageModal').style.display = 'none';
-            document.body.style.overflow = 'auto';
-        }
-        // ESC 键关闭
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') hideImageModal();
-        });
-        
-        const API_KEY = "''' + API_KEY + '''";
-        const PORT = ''' + str(PORT) + ''';
-        
-        document.getElementById('baseUrl').textContent = 'http://localhost:' + PORT + '/v1';
-        document.getElementById('apiKey').textContent = API_KEY;
-        document.getElementById('codeUrl').textContent = 'http://localhost:' + PORT + '/v1';
-        document.getElementById('codeKey').textContent = API_KEY;
-        document.getElementById('codeUrl2').textContent = 'http://localhost:' + PORT + '/v1';
-        document.getElementById('codeKey2').textContent = API_KEY;
-        
-        // 解析模型 ID (从 x-goog-ext-525001261-jspb 数组中提取)
-        function parseModelId(input) {
-            try {
-                // 尝试解析 JSON 数组
-                const arr = JSON.parse(input);
-                if (Array.isArray(arr) && arr.length > 4 && typeof arr[4] === 'string') {
-                    return arr[4];
-                }
-            } catch (e) {
-                // 尝试用正则提取 16 位十六进制字符串
-                const match = input.match(/["\']([a-f0-9]{16})["\']/i);
-                if (match) {
-                    return match[1];
-                }
-            }
-            return null;
-        }
-        
-        // 监听模型 ID 解析输入
-        document.getElementById('MODEL_ID_PARSER').addEventListener('input', (e) => {
-            const modelId = parseModelId(e.target.value);
-            const container = document.getElementById('parsedModelIdValue');
-            const infoBox = document.getElementById('parsedModelId');
-            
-            if (modelId) {
-                container.innerHTML = '<div class="item">提取到的 ID: <span style="color:#059669;font-family:monospace;">' + modelId + '</span></div>' +
-                    '<div style="margin-top:10px;">' +
-                    '<button type="button" onclick="fillModelId(\\'flash\\', \\'' + modelId + '\\')" style="margin-right:5px;padding:5px 10px;cursor:pointer;">填入极速版</button>' +
-                    '<button type="button" onclick="fillModelId(\\'pro\\', \\'' + modelId + '\\')" style="margin-right:5px;padding:5px 10px;cursor:pointer;">填入Pro版</button>' +
-                    '<button type="button" onclick="fillModelId(\\'thinking\\', \\'' + modelId + '\\')" style="padding:5px 10px;cursor:pointer;">填入思考版</button>' +
-                    '</div>';
-                infoBox.style.display = 'block';
-            } else {
-                infoBox.style.display = 'none';
-            }
-        });
-        
-        // 填入模型 ID
-        function fillModelId(type, id) {
-            const fieldMap = {
-                'flash': 'MODEL_ID_FLASH',
-                'pro': 'MODEL_ID_PRO',
-                'thinking': 'MODEL_ID_THINKING'
-            };
-            document.getElementById(fieldMap[type]).value = id;
-        }
-        
-        // Cookie 字段映射
-        const cookieFields = {
-            '__Secure-1PSID': 'SECURE_1PSID',
-            '__Secure-1PSIDTS': 'SECURE_1PSIDTS',
-            'SAPISID': 'SAPISID',
-            '__Secure-1PAPISID': 'SECURE_1PAPISID',
-            'SID': 'SID',
-            'HSID': 'HSID',
-            'SSID': 'SSID',
-            'APISID': 'APISID'
-        };
-        
-        // 解析 Cookie 字符串
-        function parseCookie(cookieStr) {
-            const result = {};
-            if (!cookieStr) return result;
-            
-            cookieStr.split(';').forEach(item => {
-                const trimmed = item.trim();
-                const eqIndex = trimmed.indexOf('=');
-                if (eqIndex > 0) {
-                    const key = trimmed.substring(0, eqIndex).trim();
-                    const value = trimmed.substring(eqIndex + 1).trim();
-                    if (cookieFields[key]) {
-                        result[cookieFields[key]] = value;
-                    }
-                }
-            });
-            return result;
-        }
-        
-        // 显示解析结果
-        function showParsedFields(parsed) {
-            const container = document.getElementById('parsedFields');
-            const infoBox = document.getElementById('parsedInfo');
-            
-            const fieldNames = {
-                'SECURE_1PSID': '__Secure-1PSID',
-                'SECURE_1PSIDTS': '__Secure-1PSIDTS',
-                'SAPISID': 'SAPISID',
-                'SID': 'SID',
-                'HSID': 'HSID',
-                'SSID': 'SSID',
-                'APISID': 'APISID'
-            };
-            
-            let html = '';
-            let hasFields = false;
-            for (const [key, name] of Object.entries(fieldNames)) {
-                if (parsed[key]) {
-                    hasFields = true;
-                    const shortValue = parsed[key].length > 30 ? parsed[key].substring(0, 30) + '...' : parsed[key];
-                    html += '<div class="item">' + name + ': <span>' + shortValue + '</span></div>';
-                }
-            }
-            
-            if (hasFields) {
-                container.innerHTML = html;
-                infoBox.style.display = 'block';
-            } else {
-                infoBox.style.display = 'none';
-            }
-        }
-        
-        // 监听 Cookie 输入
-        document.getElementById('FULL_COOKIE').addEventListener('input', (e) => {
-            const parsed = parseCookie(e.target.value);
-            showParsedFields(parsed);
-        });
-        
-        // 加载配置
-        fetch('/admin/config', {credentials: 'same-origin'}).then(r => {
-            if (!r.ok) throw new Error('未登录');
-            return r.json();
-        }).then(config => {
-            if (config.FULL_COOKIE) {
-                document.getElementById('FULL_COOKIE').value = config.FULL_COOKIE;
-                showParsedFields(parseCookie(config.FULL_COOKIE));
-            }
-            // 加载模型 ID
-            if (config.MODEL_IDS) {
-                document.getElementById('MODEL_ID_FLASH').value = config.MODEL_IDS.flash || '';
-                document.getElementById('MODEL_ID_PRO').value = config.MODEL_IDS.pro || '';
-                document.getElementById('MODEL_ID_THINKING').value = config.MODEL_IDS.thinking || '';
-            }
-        }).catch(err => {
-            console.log('加载配置失败:', err);
-        });
-        
-        document.getElementById('configForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const formData = new FormData(e.target);
-            const data = Object.fromEntries(formData.entries());
-            
-            // 构建模型 ID 对象
-            data.MODEL_IDS = {
-                flash: data.MODEL_ID_FLASH || '',
-                pro: data.MODEL_ID_PRO || '',
-                thinking: data.MODEL_ID_THINKING || ''
-            };
-            delete data.MODEL_ID_FLASH;
-            delete data.MODEL_ID_PRO;
-            delete data.MODEL_ID_THINKING;
-            
-            const statusEl = document.getElementById('status');
-            statusEl.className = 'status';
-            statusEl.style.display = 'none';
-            statusEl.textContent = '';
-            
-            // 显示保存中状态
-            const submitBtn = e.target.querySelector('button[type="submit"]');
-            const originalText = submitBtn.textContent;
-            submitBtn.textContent = '⏳ 保存中...';
-            submitBtn.disabled = true;
-            
-            try {
-                const resp = await fetch('/admin/save', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    credentials: 'same-origin',
-                    body: JSON.stringify(data)
-                });
-                
-                if (resp.status === 401) {
-                    window.location.href = '/admin/login';
-                    return;
-                }
-                
-                const result = await resp.json();
-                
-                if (result.success) {
-                    statusEl.className = 'status success';
-                    statusEl.innerHTML = '✅ ' + result.message + '<br><br>💡 <strong>配置已生效，无需重启服务！</strong>';
-                } else {
-                    statusEl.className = 'status error';
-                    statusEl.textContent = '❌ ' + result.message;
-                }
-                statusEl.style.display = 'block';
-            } catch (err) {
-                statusEl.className = 'status error';
-                statusEl.textContent = '❌ 保存失败: ' + err.message;
-                statusEl.style.display = 'block';
-            } finally {
-                submitBtn.textContent = originalText;
-                submitBtn.disabled = false;
-            }
-        });
-    </script>
+    """读取管理后台页面模板并替换变量"""
+    template_path = os.path.join(os.path.dirname(__file__), "templates", "admin.html")
+    if os.path.exists(template_path):
+        with open(template_path, "r", encoding="utf-8") as f:
+            html = f.read()
+            # 替换模板变量
+            html = html.replace("{{ API_KEY }}", API_KEY)
+            html = html.replace("{{ PORT }}", str(PORT))
+            return html
+    else:
+        # 降级方案：返回简单的HTML
+        return f'''<!DOCTYPE html>
+<html><head><title>配置</title></head>
+<body><h1>模板文件未找到，请确保 templates/admin.html 存在</h1>
+<p>API Key: {API_KEY}</p>
+<p>Port: {PORT}</p>
 </body>
 </html>'''
 
@@ -1059,6 +621,14 @@ async def admin_save(request: Request):
     _config["FULL_COOKIE"] = full_cookie
     _config["SNLM0E"] = snlm0e_to_use
     _config["PUSH_ID"] = push_id_to_use
+    
+    # 保存手动输入的值（无论是否为空，都保存，这样用户可以清空）
+    # 如果字段在表单中存在，就保存它（包括空字符串）
+    if "MANUAL_SNLM0E" in data:
+        _config["MANUAL_SNLM0E"] = manual_snlm0e
+    
+    if "MANUAL_PUSH_ID" in data:
+        _config["MANUAL_PUSH_ID"] = manual_push_id
     
     # 从解析结果更新各字段
     for field in ["SECURE_1PSID", "SECURE_1PSIDTS", "SAPISID", "SID", "HSID", "SSID", "APISID"]:
