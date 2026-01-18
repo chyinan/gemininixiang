@@ -23,6 +23,10 @@ env/
 *.swo
 *~
 
+# AI 助手配置
+.opencode/
+.claude/
+
 # 日志文件
 *.log
 api_logs.json
