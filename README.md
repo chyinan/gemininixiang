@@ -1,4 +1,4 @@
-# Gemini Web 逆向 API
+# Gemini Web官网 转 OpenAi API
 
 基于 Gemini 网页版的逆向工程，提供 OpenAI 兼容 API 服务。
 
